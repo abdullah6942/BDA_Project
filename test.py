@@ -4,8 +4,8 @@ from pymongo import MongoClient
 
 # Connect to MongoDB
 client = MongoClient('localhost', 27017)
-db = client['your_database_name']
-collection = db['your_collection_name']
+db = client['AudiosDATA']
+collection = db['Audio_collection']
 
 # Function to extract features from audio files
 def extract_features(audio_files):
