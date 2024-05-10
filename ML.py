@@ -30,8 +30,8 @@ try:
     df = df.drop("features")
 
     # Configure LSH parameters
-    num_hash_tables = 5
-    bucket_length = 10.0
+    num_hash_tables = 2
+    bucket_length = 4.0
 
     # Initialize LSH model
     print("Initializing LSH model...")
