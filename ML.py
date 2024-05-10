@@ -1,102 +1,59 @@
-import numpy as np
-import warnings
 from pyspark.sql import SparkSession
-from pyspark.sql.types import DoubleType, StringType
-from pyspark.ml.feature import BucketedRandomProjectionLSH
+from pyspark.sql.types import DoubleType, ArrayType, StructType, StructField, StringType
+from pyspark.ml.feature import MinMaxScaler
 from pyspark.ml.linalg import Vectors, VectorUDT
-from pyspark.sql.functions import udf
+from pyspark.ml.clustering import KMeans
+from pyspark.ml.evaluation import ClusteringEvaluator
+from pyspark.sql.functions import udf, col, expr
 
-try:
-    # Initialize SparkSession
-    print("Initializing SparkSession...")
-    spark = SparkSession.builder \
-        .appName("MusicRecommendation") \
-        .getOrCreate()
+# Create Spark Session
+spark = SparkSession.builder \
+    .appName("LSH_NearestNeighbor") \
+    .getOrCreate()
 
-    # Load the audio features dataset from MongoDB into a Spark DataFrame
-    print("Loading data from MongoDB...")
-    df = spark.read.format("mongo").option("uri", "mongodb://localhost:27017/music_features2.audio_features2").load()
+# Define the schema including 'features' and 'filename' columns
+schema = StructType([
+    StructField("features", ArrayType(DoubleType()), nullable=False),
+    StructField("filename", StringType(), nullable=False)
+])
 
-    # Define a UDF to convert array to vector
-    print("Defining UDF...")
-    array_to_vector_udf = udf(lambda arr: Vectors.dense(arr), VectorUDT())
+# Read data from MongoDB collection with the specified schema
+df = spark.read.format("mongo") \
+    .option("uri", "mongodb://localhost:27017/spotify.spotify_features") \
+    .schema(schema) \
+    .load()
 
-    # Apply the UDF to convert "features" array to "features_vector" vector
-    print("Converting features array to vector...")
-    df = df.withColumn("features_vector", array_to_vector_udf("features"))
+# Print schema and count for debugging
+df.printSchema()
+print("Number of rows in DataFrame:", df.count())
 
-    # Drop the original "features" column as it's no longer needed
-    print("Dropping original 'features' column...")
-    df = df.drop("features")
+# Check 'features' column for consistent dimensions
+df.selectExpr("size(features) as feature_size").distinct().show()
 
-    # Configure LSH parameters
-    num_hash_tables = 2
-    bucket_length = 4.0
+# Filter out rows with inconsistent feature dimensions
+df = df.filter(expr("size(features) = 25822"))
 
-    # Initialize LSH model
-    print("Initializing LSH model...")
-    lsh = BucketedRandomProjectionLSH(inputCol="features_vector", outputCol="hashes", numHashTables=num_hash_tables, bucketLength=bucket_length)
+# Define UDF to convert array to dense vector
+to_vector_udf = udf(lambda features: Vectors.dense(features), VectorUDT())
+df = df.withColumn("features_vector", to_vector_udf(col("features")))
 
-    # Fit the LSH model to the dataset
-    print("Fitting LSH model to the dataset...")
-    lsh_model = lsh.fit(df)
+# Apply Min-Max Scaling
+scaler = MinMaxScaler(inputCol="features_vector", outputCol="scaled_features")
+scaler_model = scaler.fit(df)
+scaled_df = scaler_model.transform(df)
 
-    # Query MongoDB to retrieve the features of the track
-    track_filename = "000002.mp3"  # Example filename of the track
-    print(f"Querying MongoDB to retrieve features of track {track_filename}...")
-    track_features_array = df.filter(df.filename == track_filename).select("features_vector").collect()[0][0]
+# Train KMeans Clustering Model
+kmeans = KMeans(featuresCol='scaled_features', predictionCol='prediction', k=5)
+kmeans_model = kmeans.fit(scaled_df)
+clustered_df = kmeans_model.transform(scaled_df)
 
-    # Convert features array to vector representation
-    print("Converting features array to vector representation...")
-    track_features_vector = Vectors.dense(track_features_array)
+# Evaluate the Clustering Model using Silhouette Score
+evaluator = ClusteringEvaluator(distanceMeasure="squaredEuclidean", featuresCol="scaled_features", predictionCol="prediction")
+silhouette = evaluator.evaluate(clustered_df)
+print("Silhouette with squared Euclidean distance =", silhouette)
 
-    # Assign the vector to the key variable
-    key = track_features_vector
-
-    # Define the number of nearest neighbors to retrieve
-    numNearestNeighbors = 5
-
-    # Perform nearest neighbor search using LSH
-    print("Performing nearest neighbor search using LSH...")
-    nearest_neighbors = lsh_model.approxNearestNeighbors(df, key, numNearestNeighbors)
-
-    # Show the nearest neighbors for each data point
-    print("Showing the nearest neighbors for each data point:")
-    nearest_neighbors.show()
-
-except Exception as e:
-    print("An error occurred:", str(e))
-
-finally:
-    # Stop SparkSession
-    print("Stopping SparkSession...")
-    if 'spark' in locals():
-        spark.stop()
-
-    # BLAS Implementation warning handling
-    try:
-        np.dot([1, 2], [3, 4])
-    except ImportError:
-        warnings.warn("Failed to load BLAS implementation. Performance may be degraded.")
-
-    # Broadcasting large task binary warning handling
-    if lsh_model is not None:
-        model_size = len(lsh_model._java_obj.serializeToPython())
-        broadcast_threshold = 1024 * 1024  # 1 MB threshold for broadcasting warning
-        if model_size > broadcast_threshold:
-            warnings.warn(f"Broadcasting large task binary with size {model_size / 1024:.1f} KiB. Consider optimizing.")
-
-    # Executor Heartbeat Timeout warning handling
-    executor_timeout = 120000  # milliseconds
-    if spark is not None and spark.sparkContext is not None:
-        for executor_id, last_seen in spark.sparkContext._scheduler.executorLastSeen.items():
-            current_time = spark.sparkContext._scheduler.clock.getTimeMillis()
-            if current_time - last_seen > executor_timeout:
-                warnings.warn(f"Executor {executor_id} has not sent heartbeats recently. It may have failed or be unresponsive.")
-
-    # Error handling for killing issue
-    try:
-        # Add any additional cleanup code here
-        pass
-    except Exception as e:
-        print("An error occurred during cleanup:", str(e))
+# Output tracks identified as having similar patterns
+similar_tracks = clustered_df.select("features_vector", "prediction", "filename").filter(col("prediction") == 0).collect()
+print("Tracks with similar patterns (Cluster 0):")
+for track in similar_tracks:
+    print(track["filename"])
