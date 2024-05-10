@@ -1,52 +1,102 @@
+import numpy as np
+import warnings
 from pyspark.sql import SparkSession
-from pyspark.ml.feature import VectorAssembler
-from pyspark.ml.regression import MultilayerPerceptronRegressor
-from pyspark.ml.evaluation import RegressionEvaluator
-from pymongo import MongoClient
+from pyspark.sql.types import DoubleType, StringType
+from pyspark.ml.feature import BucketedRandomProjectionLSH
+from pyspark.ml.linalg import Vectors, VectorUDT
+from pyspark.sql.functions import udf
 
-# Connect to MongoDB and retrieve data
-client = MongoClient('localhost', 27017)
-db = client['audio']
-collection = db['audio_collection']
-cursor = collection.find()
+try:
+    # Initialize SparkSession
+    print("Initializing SparkSession...")
+    spark = SparkSession.builder \
+        .appName("MusicRecommendation") \
+        .getOrCreate()
 
-# Create a Spark session
-spark = SparkSession.builder \
-    .appName("MusicRecommendation") \
-    .getOrCreate()
+    # Load the audio features dataset from MongoDB into a Spark DataFrame
+    print("Loading data from MongoDB...")
+    df = spark.read.format("mongo").option("uri", "mongodb://localhost:27017/music_features2.audio_features2").load()
 
-# Convert MongoDB data to a Spark DataFrame
-data = []
-for document in cursor:
-    features = document['features'][0]  #  'features' is an array of numbers
-    data.append((features,))  # Add each feature array as a tuple to the data list
+    # Define a UDF to convert array to vector
+    print("Defining UDF...")
+    array_to_vector_udf = udf(lambda arr: Vectors.dense(arr), VectorUDT())
 
-# Define the schema for the DataFrame
-schema = ["features"]
-df = spark.createDataFrame(data, schema)
+    # Apply the UDF to convert "features" array to "features_vector" vector
+    print("Converting features array to vector...")
+    df = df.withColumn("features_vector", array_to_vector_udf("features"))
 
-# Split the data into training and testing sets
-train_data, test_data = df.randomSplit([0.8, 0.2])
+    # Drop the original "features" column as it's no longer needed
+    print("Dropping original 'features' column...")
+    df = df.drop("features")
 
-# Define the features vector
-assembler = VectorAssembler(inputCols=["features"], outputCol="features_vector")
-train_data = assembler.transform(train_data)
-test_data = assembler.transform(test_data)
+    # Configure LSH parameters
+    num_hash_tables = 5
+    bucket_length = 10.0
 
-# Define the ANN model
-layers = [len(train_data.select('features_vector').first()[0]), 64, 32, 1]  # Define the layers of the ANN
-ann = MultilayerPerceptronRegressor(layers=layers, seed=123)
+    # Initialize LSH model
+    print("Initializing LSH model...")
+    lsh = BucketedRandomProjectionLSH(inputCol="features_vector", outputCol="hashes", numHashTables=num_hash_tables, bucketLength=bucket_length)
 
-# Train the ANN model
-ann_model = ann.fit(train_data)
+    # Fit the LSH model to the dataset
+    print("Fitting LSH model to the dataset...")
+    lsh_model = lsh.fit(df)
 
-# Make predictions on the test data
-predictions = ann_model.transform(test_data)
+    # Query MongoDB to retrieve the features of the track
+    track_filename = "000002.mp3"  # Example filename of the track
+    print(f"Querying MongoDB to retrieve features of track {track_filename}...")
+    track_features_array = df.filter(df.filename == track_filename).select("features_vector").collect()[0][0]
 
-# Evaluate the model using a regression evaluator
-evaluator = RegressionEvaluator(labelCol="features_vector", predictionCol="prediction", metricName="rmse")
-rmse = evaluator.evaluate(predictions)
-print(f"Root Mean Squared Error (RMSE): {rmse}")
+    # Convert features array to vector representation
+    print("Converting features array to vector representation...")
+    track_features_vector = Vectors.dense(track_features_array)
 
-# Stop the Spark session
-spark.stop()
+    # Assign the vector to the key variable
+    key = track_features_vector
+
+    # Define the number of nearest neighbors to retrieve
+    numNearestNeighbors = 5
+
+    # Perform nearest neighbor search using LSH
+    print("Performing nearest neighbor search using LSH...")
+    nearest_neighbors = lsh_model.approxNearestNeighbors(df, key, numNearestNeighbors)
+
+    # Show the nearest neighbors for each data point
+    print("Showing the nearest neighbors for each data point:")
+    nearest_neighbors.show()
+
+except Exception as e:
+    print("An error occurred:", str(e))
+
+finally:
+    # Stop SparkSession
+    print("Stopping SparkSession...")
+    if 'spark' in locals():
+        spark.stop()
+
+    # BLAS Implementation warning handling
+    try:
+        np.dot([1, 2], [3, 4])
+    except ImportError:
+        warnings.warn("Failed to load BLAS implementation. Performance may be degraded.")
+
+    # Broadcasting large task binary warning handling
+    if lsh_model is not None:
+        model_size = len(lsh_model._java_obj.serializeToPython())
+        broadcast_threshold = 1024 * 1024  # 1 MB threshold for broadcasting warning
+        if model_size > broadcast_threshold:
+            warnings.warn(f"Broadcasting large task binary with size {model_size / 1024:.1f} KiB. Consider optimizing.")
+
+    # Executor Heartbeat Timeout warning handling
+    executor_timeout = 120000  # milliseconds
+    if spark is not None and spark.sparkContext is not None:
+        for executor_id, last_seen in spark.sparkContext._scheduler.executorLastSeen.items():
+            current_time = spark.sparkContext._scheduler.clock.getTimeMillis()
+            if current_time - last_seen > executor_timeout:
+                warnings.warn(f"Executor {executor_id} has not sent heartbeats recently. It may have failed or be unresponsive.")
+
+    # Error handling for killing issue
+    try:
+        # Add any additional cleanup code here
+        pass
+    except Exception as e:
+        print("An error occurred during cleanup:", str(e))
