@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sign up</title>
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='style.css') }}">
+    
+</head>
+<body>
+    
+
+    
+    {% with messages = get_flashed_messages() %}
+    {% if messages %}
+        <div class="flash-messages">
+            {% for msg in messages %}
+                <div class="flash-success">{{ msg }}</div>
+            {% endfor %}
+        </div>
+    {% endif %}
+    {% endwith %}
+    <span class="form">
+        <form action = "/signup" method = "POST">
+            <label for="email">Email Address:</label>
+            <input type="text" name="email"><br>
+    
+            
+            <label for="username">Username:</label>
+            <input type="username" name="username"><br>
+    
+    
+            <label for="password">Password:</label>
+            <input type="password" name="password"><br>  
+             
+             
+            
+            
+            <button type="submit">Create Account</button><br>
+    
+        </form>
+        <a href="/">
+            <button>Go Back</button>
+        </a>
+    </span>
+</body>
+</html>
