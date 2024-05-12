@@ -1,38 +1,54 @@
-<!DOCTYPE html>
 <html>
 <head>
     <title>Home 2</title>
     <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='style.css') }}">
     <style>
         /* Additional CSS styles for the recommendations box */
+        .selected-track {
+            font-weight: bold;
+            color: white;
+        }
         .recommendations-box {
             border: 1px solid #ccc;
             padding: 20px; /* Increased padding */
             margin-top: 20px;
-            background-color: #000000;
-            color: rgb(255, 255, 255);
+            background-color: #719ECE;
+            color: black;
             font-size: 16px; /* Adjust font size */
         }
         .listen-tracks {
-            color: rgb(0, 0, 0); /* Color for "Users also listen to the following tracks:" */
-            margin-top: 20px; /* Moved down */
+            color: white; /* Color for "Users also listen to the following tracks:" */
         }
-        .selected-track {
-            font-weight: bold;
-            color: white;
-            margin-top: 20px; /* Moved down */
+        .dropdown {
+            margin-top: 20px; /* Add margin */
+        }
+        .dropdown select {
+            padding: 10px;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            width: 100%; /* Full width */
+        }
+        .dropdown select:focus {
+            outline: none;
+            border-color: #719ECE; /* Highlight on focus */
         }
     </style>
 </head>
 <body>
-    <h2 class="listen-tracks">You may also like the following tracks:</h2>
-    <div class="recommendations-box">
-        <!-- Display recommendations here -->
-        {% for recommendation in recommendations %}
-            <p>{{ recommendation }}</p>
-        {% endfor %}
-    </div>
+    <!-- <h1>Welcome, {{ username }}</h1> -->
     <p class="selected-track">You selected: {{ selected_music }}</p>
+    <h2 class="listen-tracks">Users also listen to the following tracks:</h2>
+    <div class="recommendations-box">
+        <!-- Dynamic dropdown menu for recommendations -->
+        <div class="dropdown">
+            <select id="recommendation-dropdown" onchange="window.location.href=this.value">
+                <option value="" disabled selected>Select a track</option>
+                {% for recommendation in recommendations[:10] %}
+                    <option value="{{ url_for('home2') }}?music_file={{ recommendation }}">{{ recommendation }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
 </body>
 </html>
-
