@@ -3,16 +3,36 @@
 <head>
     <title>Home 2</title>
     <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        /* Additional CSS styles for the recommendations box */
+        .recommendations-box {
+            border: 1px solid #ccc;
+            padding: 20px; /* Increased padding */
+            margin-top: 20px;
+            background-color: #000000;
+            color: rgb(255, 255, 255);
+            font-size: 16px; /* Adjust font size */
+        }
+        .listen-tracks {
+            color: rgb(0, 0, 0); /* Color for "Users also listen to the following tracks:" */
+            margin-top: 20px; /* Moved down */
+        }
+        .selected-track {
+            font-weight: bold;
+            color: white;
+            margin-top: 20px; /* Moved down */
+        }
+    </style>
 </head>
 <body>
-    <h1>Welcome, {{ username }}</h1>
-    <p>You selected: {{ selected_music }}</p>
-    <h2>Recommended Audio Files:</h2>
-    <ul>
+    <h2 class="listen-tracks">You may also like the following tracks:</h2>
+    <div class="recommendations-box">
+        <!-- Display recommendations here -->
         {% for recommendation in recommendations %}
-            <li>{{ recommendation }}</li>
+            <p>{{ recommendation }}</p>
         {% endfor %}
-    </ul>
-    <!-- Add any additional content or styling here -->
+    </div>
+    <p class="selected-track">You selected: {{ selected_music }}</p>
 </body>
 </html>
+
